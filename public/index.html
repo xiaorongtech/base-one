@@ -129,6 +129,7 @@
   }
 
   function render(node) {
+    infoEl.innerHTML = "";
     var host = location.hostname;
     var query = "encryption=none&security=tls&sni=" + encodeURIComponent(host) +
                 "&fp=chrome&type=ws&host=" + encodeURIComponent(host) +
@@ -136,6 +137,7 @@
     var uri = "vless://" + node.uuid + "@" + host + ":" + node.port + "?" + query +
               "#" + encodeURIComponent(node.remark || "Komuta Free Edge");
 
+    setField("状态", "运行中");
     setField("地址", host + ":" + node.port);
     setField("UUID", node.uuid);
     setField("路径", node.path);
