@@ -9,6 +9,9 @@ target:
     git: github-app-xiaorongtech
     registry: komuta
 
+apply:
+  adoptExisting: explicit
+
 secrets:
   - name: vless-uuid
     source: generate
@@ -32,7 +35,7 @@ services:
         value: /r9q2x7b6p4w8
     ports:
       - name: http
-        containerPort: 80
+        containerPort: 8080
         primary: true
     network:
       public: true
