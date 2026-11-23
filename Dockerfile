@@ -6,6 +6,7 @@ RUN apk add --no-cache \
       ca-certificates \
       curl \
       gettext \
+      libcap \
       nginx \
       unzip \
     && addgroup -S xray \
@@ -33,7 +34,9 @@ COPY public/index.html /etc/nginx/templates/index.html.template
 COPY entrypoint.sh /entrypoint.sh
 
 RUN chmod +x /entrypoint.sh \
-    && chmod -R a+rX /etc/nginx/templates /etc/xray
+    && chmod -R a+rX /etc/nginx/templates /etc/xray \
+    && chmod -R a+rwX /var/lib/nginx /var/log/nginx \
+    && setcap cap_net_bind_service=+ep /usr/sbin/nginx
 
 # 运行时配置渲染到 /run/app（任意用户可写），监听 8080 以兼容非 root 运行
 EXPOSE 8080/tcp

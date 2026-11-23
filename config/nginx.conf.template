@@ -1,4 +1,3 @@
-user nginx;
 worker_processes auto;
 error_log /dev/stderr notice;
 pid /run/app/nginx.pid;
@@ -30,8 +29,7 @@ http {
   }
 
   server {
-    listen 8080 default_server;
-    listen [::]:8080 default_server;
+${LISTEN_DIRECTIVES}
 
     root /run/app/www;
     index index.html;

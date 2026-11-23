@@ -56,7 +56,32 @@ if [ "$VLESS_UUID_EFFECTIVE" != "$VLESS_UUID" ]; then
   echo "Normalised VLESS id into UUID format (raw secret stays in the platform vault)"
 fi
 
-export VLESS_UUID="$VLESS_UUID_EFFECTIVE" WS_PATH
+# 平台边缘层固定把流量转发到容器 80 端口，但容器通常以非 root 运行。
+# 镜像已给 nginx 加 cap_net_bind_service。用一个空闲的特权端口 81 试探绑定能力，
+# 避免与真正要用的 80 抢绑（探测进程退出与正式启动之间存在竞态）。
+probe_bind() {
+  _port="$1"
+  _cfg=$(mktemp)
+  printf 'pid /run/app/probe.pid;\nerror_log /dev/null;\nevents { worker_connections 8; }\nhttp { server { listen %s; } }\n' "$_port" > "$_cfg"
+  if nginx -c "$_cfg" >/dev/null 2>&1; then
+    nginx -s stop -c "$_cfg" >/dev/null 2>&1 || true
+    rm -f "$_cfg"
+    return 0
+  fi
+  rm -f "$_cfg"
+  return 1
+}
+
+if probe_bind 81; then
+  LISTEN_DIRECTIVES="listen 80 default_server;
+    listen 8080 default_server;"
+  echo "Privileged port bind works as uid=$(id -u); serving on 80 and 8080"
+else
+  LISTEN_DIRECTIVES="listen 8080 default_server;"
+  echo "WARNING: cannot bind a privileged port as uid=$(id -u); serving on 8080 only" >&2
+fi
+
+export VLESS_UUID="$VLESS_UUID_EFFECTIVE" WS_PATH LISTEN_DIRECTIVES
 
 # 以非 root 运行时 /etc 不可写，配置一律渲染到 /run/app（tmpfs，任意用户可写）
 RUN_DIR="${RUN_DIR:-/run/app}"
@@ -65,7 +90,7 @@ WWW_DIR="$RUN_DIR/www"
 mkdir -p "$CONF_DIR" "$WWW_DIR"
 
 echo "Rendering service configuration"
-envsubst '${WS_PATH}' < /etc/nginx/templates/nginx.conf.template > "$CONF_DIR/nginx.conf"
+envsubst '${WS_PATH} ${LISTEN_DIRECTIVES}' < /etc/nginx/templates/nginx.conf.template > "$CONF_DIR/nginx.conf"
 envsubst '${VLESS_UUID} ${WS_PATH}' < /etc/xray/xray.json.template > "$CONF_DIR/xray.json"
 envsubst '${WS_PATH}' < /etc/nginx/templates/index.html.template > "$WWW_DIR/index.html"
 
