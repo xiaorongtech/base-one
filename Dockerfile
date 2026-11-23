@@ -29,15 +29,16 @@ RUN apk add --no-cache \
 
 COPY config/nginx.conf.template /etc/nginx/templates/nginx.conf.template
 COPY config/xray.json.template /etc/xray/xray.json.template
-COPY public/ /usr/share/nginx/html/
+COPY public/index.html /etc/nginx/templates/index.html.template
 COPY entrypoint.sh /entrypoint.sh
 
-RUN chmod +x /entrypoint.sh
+RUN chmod +x /entrypoint.sh \
+    && chmod -R a+rX /etc/nginx/templates /etc/xray
 
 # 运行时配置渲染到 /run/app（任意用户可写），监听 8080 以兼容非 root 运行
 EXPOSE 8080/tcp
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:8080/ >/dev/null 2>&1 || exit 1
+  CMD wget -qO- http://127.0.0.1:8080/healthz >/dev/null 2>&1 || exit 1
 
 ENTRYPOINT ["/entrypoint.sh"]

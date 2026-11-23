@@ -33,8 +33,21 @@ http {
     listen 8080 default_server;
     listen [::]:8080 default_server;
 
-    root /usr/share/nginx/html;
+    root /run/app/www;
     index index.html;
+
+    # 健康检查：容器探针用
+    location = /healthz {
+      default_type text/plain;
+      return 200 "ok\n";
+    }
+
+    # 节点参数只挂在 WS 路径前缀下，不做全站公开
+    location = ${WS_PATH}/node.json {
+      alias /run/app/www/node.json;
+      default_type application/json;
+      add_header Cache-Control "no-store";
+    }
 
     location = ${WS_PATH} {
       proxy_pass http://127.0.0.1:10000;

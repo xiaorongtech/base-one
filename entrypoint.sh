@@ -9,19 +9,87 @@ case "$WS_PATH" in
   *) WS_PATH="/$WS_PATH" ;;
 esac
 
-export VLESS_UUID WS_PATH
+# 平台 secret 给出的是任意长度随机串，而 VLESS 的 id 必须是合法 UUID。
+# 这里做一次确定性规范化：合法 UUID 原样使用，其余值用 SHA-256 派生为 UUID v4。
+# 原始 secret 始终留在平台 Vault 中，不会出现在镜像、仓库或日志里。
+normalize_uuid() {
+  _v="$1"
+  _lower=$(printf '%s' "$_v" | tr 'A-Z' 'a-z')
+
+  if printf '%s' "$_lower" | grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'; then
+    printf '%s' "$_lower"
+    return
+  fi
+
+  if printf '%s' "$_lower" | grep -Eq '^[0-9a-f]{32}$'; then
+    printf '%s-%s-%s-%s-%s' \
+      "$(printf '%s' "$_lower" | cut -c1-8)" \
+      "$(printf '%s' "$_lower" | cut -c9-12)" \
+      "$(printf '%s' "$_lower" | cut -c13-16)" \
+      "$(printf '%s' "$_lower" | cut -c17-20)" \
+      "$(printf '%s' "$_lower" | cut -c21-32)"
+    return
+  fi
+
+  _h=$(printf '%s' "$_v" | sha256sum | cut -c1-32)
+  _a=$(printf '%s' "$_h" | cut -c1-8)
+  _b=$(printf '%s' "$_h" | cut -c9-12)
+  _c=$(printf '%s' "$_h" | cut -c13-16)
+  _d=$(printf '%s' "$_h" | cut -c17-20)
+  _e=$(printf '%s' "$_h" | cut -c21-32)
+
+  # version = 4
+  _c="4$(printf '%s' "$_c" | cut -c2-4)"
+
+  # variant = 10xx (8/9/a/b)
+  case "$(printf '%s' "$_d" | cut -c1-1)" in
+    8|9|a|b) ;;
+    *) _d="a$(printf '%s' "$_d" | cut -c2-4)" ;;
+  esac
+
+  printf '%s-%s-%s-%s-%s' "$_a" "$_b" "$_c" "$_d" "$_e"
+}
+
+VLESS_UUID_EFFECTIVE=$(normalize_uuid "$VLESS_UUID")
+
+if [ "$VLESS_UUID_EFFECTIVE" != "$VLESS_UUID" ]; then
+  echo "Normalised VLESS id into UUID format (raw secret stays in the platform vault)"
+fi
+
+export VLESS_UUID="$VLESS_UUID_EFFECTIVE" WS_PATH
 
 # 以非 root 运行时 /etc 不可写，配置一律渲染到 /run/app（tmpfs，任意用户可写）
 RUN_DIR="${RUN_DIR:-/run/app}"
 CONF_DIR="$RUN_DIR/conf"
-mkdir -p "$CONF_DIR"
+WWW_DIR="$RUN_DIR/www"
+mkdir -p "$CONF_DIR" "$WWW_DIR"
 
 echo "Rendering service configuration"
 envsubst '${WS_PATH}' < /etc/nginx/templates/nginx.conf.template > "$CONF_DIR/nginx.conf"
 envsubst '${VLESS_UUID} ${WS_PATH}' < /etc/xray/xray.json.template > "$CONF_DIR/xray.json"
+envsubst '${WS_PATH}' < /etc/nginx/templates/index.html.template > "$WWW_DIR/index.html"
+
+# 供落地页/客户端读取的节点参数（不含任何本地凭据）
+cat > "$WWW_DIR/node.json" <<JSON
+{
+  "uuid": "${VLESS_UUID}",
+  "path": "${WS_PATH}",
+  "port": 443,
+  "tls": true,
+  "host": "",
+  "sni": "",
+  "network": "ws",
+  "remark": "Komuta Free Edge - Germany-East"
+}
+JSON
+chmod 0644 "$WWW_DIR/node.json" "$WWW_DIR/index.html"
 
 echo "Validating internal proxy configuration"
-/usr/local/bin/xray run -test -c "$CONF_DIR/xray.json" >/dev/null 2>&1
+if ! _xout=$(/usr/local/bin/xray run -test -c "$CONF_DIR/xray.json" 2>&1); then
+  printf '%s\n' "$_xout" | tail -n 5
+  echo "Xray configuration test failed" >&2
+  exit 23
+fi
 
 echo "Validating Nginx configuration"
 nginx -t -c "$CONF_DIR/nginx.conf"
