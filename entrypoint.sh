@@ -11,22 +11,27 @@ esac
 
 export VLESS_UUID WS_PATH
 
+# 以非 root 运行时 /etc 不可写，配置一律渲染到 /run/app（tmpfs，任意用户可写）
+RUN_DIR="${RUN_DIR:-/run/app}"
+CONF_DIR="$RUN_DIR/conf"
+mkdir -p "$CONF_DIR"
+
 echo "Rendering service configuration"
-envsubst '${WS_PATH}' < /etc/nginx/templates/nginx.conf.template > /etc/nginx/nginx.conf
-envsubst '${VLESS_UUID} ${WS_PATH}' < /etc/xray/xray.json.template > /etc/xray/config.json
+envsubst '${WS_PATH}' < /etc/nginx/templates/nginx.conf.template > "$CONF_DIR/nginx.conf"
+envsubst '${VLESS_UUID} ${WS_PATH}' < /etc/xray/xray.json.template > "$CONF_DIR/xray.json"
 
 echo "Validating internal proxy configuration"
-/usr/local/bin/xray run -test -c /etc/xray/config.json >/dev/null 2>&1
+/usr/local/bin/xray run -test -c "$CONF_DIR/xray.json" >/dev/null 2>&1
 
 echo "Validating Nginx configuration"
-nginx -t
+nginx -t -c "$CONF_DIR/nginx.conf"
 
 echo "Starting internal proxy"
-su-exec xray:xray /usr/local/bin/xray run -c /etc/xray/config.json >/dev/null 2>&1 &
+/usr/local/bin/xray run -c "$CONF_DIR/xray.json" >/dev/null 2>&1 &
 XRAY_PID="$!"
 
 echo "Starting Nginx"
-nginx -g 'daemon off;' &
+nginx -c "$CONF_DIR/nginx.conf" -g 'daemon off;' &
 NGINX_PID="$!"
 
 term_handler() {

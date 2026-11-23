@@ -1,0 +1,38 @@
+version: 1
+name: base-one-vless
+
+target:
+  project: myproject
+  region: Germany-East
+  deploymentTarget: paas
+  connections:
+    git: github-app-xiaorongtech
+    registry: komuta
+
+secrets:
+  - name: vless-uuid
+    source: generate
+    length: 48
+
+services:
+  - name: xray
+    workload: service
+    source:
+      repository: https://github.com/xiaorongtech/base-one.git
+      branch: main
+    build:
+      strategy: dockerfile
+    compute:
+      plan: dz-nano
+    env:
+      - name: VLESS_UUID
+        valueFrom:
+          secret: vless-uuid
+      - name: WS_PATH
+        value: /r9q2x7b6p4w8
+    ports:
+      - name: http
+        containerPort: 80
+        primary: true
+    network:
+      public: true
